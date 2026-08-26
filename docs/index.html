@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prioritising Content Refresh: A Ranked Queue for Declining Search Pages</title>
+  <meta name="description" content="A gradient-boosted ranking model that scores content pages by refresh priority, built on 141K pages from a 79M-row search performance warehouse.">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #1a1a1a;
+      --muted: #555;
+      --border: #ddd;
+      --accent: #2563eb;
+      --accent-bg: #f0f4ff;
+      --code-bg: #f5f5f5;
+      --max-w: 720px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --fg: #e2e8f0;
+        --muted: #94a3b8;
+        --border: #334155;
+        --accent: #60a5fa;
+        --accent-bg: #1e293b;
+        --code-bg: #1e293b;
+      }
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { font-size: 17px; scroll-behavior: smooth; }
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: var(--max-w); margin: 0 auto; }
+    h1 { font-size: 1.6rem; line-height: 1.3; margin-bottom: 0.5rem; font-weight: 700; }
+    h2 { font-size: 1.25rem; margin-top: 2.5rem; margin-bottom: 0.75rem; font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; margin-bottom: 0.5rem; font-weight: 700; }
+    p { margin-bottom: 1rem; }
+    .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+    .meta a { color: var(--accent); text-decoration: none; }
+    .meta a:hover { text-decoration: underline; }
+    abstract {
+      display: block;
+      background: var(--accent-bg);
+      border-left: 3px solid var(--accent);
+      padding: 1rem 1.25rem;
+      margin: 1.5rem 0;
+      font-style: italic;
+      line-height: 1.6;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0 1.5rem;
+      font-size: 0.9rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+    th { background: var(--accent-bg); font-weight: 600; }
+    code {
+      font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+      background: var(--code-bg);
+      padding: 0.15em 0.4em;
+      border-radius: 3px;
+      font-size: 0.88em;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin: 1rem 0 1.5rem;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    pre code { background: none; padding: 0; }
+    blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 0.75rem 1rem;
+      margin: 1rem 0;
+      color: var(--muted);
+      font-style: italic;
+    }
+    ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+    li { margin-bottom: 0.35rem; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+    .fill { color: var(--accent); font-weight: 600; }
+    .chart-placeholder {
+      background: var(--accent-bg);
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      padding: 2rem;
+      text-align: center;
+      color: var(--muted);
+      margin: 1rem 0;
+      font-style: italic;
+    }
+    @media (max-width: 600px) {
+      html { font-size: 15px; }
+      body { padding: 1rem 0.75rem; }
+      table { font-size: 0.8rem; }
+      th, td { padding: 0.35rem 0.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <h1>Prioritising Content Refresh: A Ranked Queue for Declining Search Pages</h1>
+    <div class="meta">
+      <strong>Saleh Al-Nassar</strong> &middot; Lane 2: Refresh / Content Opportunity Scoring<br>
+      <a href="https://github.com/SalehAl-Nassar/flyrank-internship-ml">GitHub repo</a> &middot; August 2026
+    </div>
+
+    <abstract>
+      Content teams managing large portfolios face a prioritisation problem: hundreds of thousands of pages compete for finite review capacity, and missing a high-traffic page in decline is costlier than auditing one that didn't need attention. I built a ranked queue that scores each content page by its probability of decline, using features derived from the first half of March 2026 and a proxy label defined from the second half &mdash; enforcing strict temporal separation between what the model sees and what it predicts. I trained a gradient-boosted tree model (XGBoost) on 17 features across ~141,000 labelable pages from the FlyRank internship warehouse (~79M daily rows), and evaluated both a heuristic baseline and the learned model on Recall@K among pages with at least 100 search impressions. The XGBoost model captured a larger fraction of declining high-traffic pages at every K compared to the heuristic, with the gap widening at higher reviewer capacities. The output is a ranked queue with human-readable reason codes &mdash; not just a score &mdash; designed to support a reviewer's decision about which pages to audit first.
+    </abstract>
+
+    <!-- Section 1 -->
+    <h2>1. Introduction / Problem statement</h2>
+    <p>A content reviewer staring at 300,000 pages has no starting point. Dashboards show aggregate trends; SQL filters surface pages matching one criterion at a time. But the decision &mdash; which page to refresh first &mdash; depends on multiple signals interacting: traffic volume, search position, content age, engagement, and how those signals combine differently for each page type and client. Without a ranked queue, the reviewer either samples randomly (wasting time on low-priority pages) or applies a single filter (missing pages that don't match the obvious pattern but are still declining).</p>
+    <p>This project builds that queue. The output is a scored, ranked list of pages with probability-of-decline scores and reason codes explaining <em>why</em> each page scored that way. A reviewer opens the list, starts at the top, and works down until their review capacity is exhausted. The model doesn't replace editorial judgment &mdash; it prioritises the reviewer's time.</p>
+    <p>The cost asymmetry matters: a false negative (missing a page that truly needs refresh) is more expensive than a false positive (reviewing a page that was fine &mdash; the reviewer spends 20 minutes and moves on). This asymmetry drives the choice of metric: Recall@K, not precision, is the primary evaluation number.</p>
+
+    <!-- Section 2 -->
+    <h2>2. Data</h2>
+    <p><strong>Source:</strong> FlyRank internship warehouse on Hugging Face (<code>FlyRank/internship-warehouse</code>), build v20260703. Accessed via <code>hf://</code> + DuckDB per the starter notebook pattern.</p>
+    <p><strong>Tables used:</strong></p>
+    <table>
+      <thead><tr><th>Table</th><th>Rows</th><th>Grain</th></tr></thead>
+      <tbody>
+        <tr><td><code>fact_content_daily_performance</code> (March 2026)</td><td>9.8M</td><td>report_date &times; client &times; content</td></tr>
+        <tr><td><code>dim_content</code></td><td>519,606</td><td>one per content item</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Date windows:</strong></p>
+    <ul>
+      <li><strong>Feature window (H1):</strong> March 1&ndash;15, 2026. All features computed from this window or from <code>dim_content</code> (static metadata).</li>
+      <li><strong>Label window (H2):</strong> March 16&ndash;31, 2026. Proxy label computed exclusively from this window.</li>
+    </ul>
+    <p><strong>Population:</strong> ~320,000 distinct pages in March 2026. ~141,000 had non-NULL average search position in both H1 and H2 (required for the label). Among those, ~44% were classified as declining.</p>
+    <p><strong>Visibility floor:</strong> Evaluation restricted to pages with <code>impressions_h1 &gt;= 100</code>. Pages below this threshold don't have enough search traffic to warrant reviewer attention.</p>
+    <p><strong>Exclusions:</strong></p>
+    <ul>
+      <li><code>impressions_h2</code>, <code>clicks_h2</code>, <code>avg_position_h2</code>, <code>sessions_h2</code>, <code>engaged_sessions_h2</code>, <code>sessions_organic_h2</code> &mdash; label-window columns, excluded to prevent temporal leakage.</li>
+      <li><code>trend_direction</code>, <code>trend_pct</code> &mdash; label-source columns, excluded as precaution.</li>
+      <li><code>content_hash_id</code>, <code>client_hash_id</code> &mdash; IDs for grouping/splitting only, never features.</li>
+      <li><code>keyword_hash_id</code>, <code>url_hash_id</code>, <code>provider_used</code>, <code>model_used</code>, <code>is_published</code>, <code>is_deleted</code> &mdash; product details, not content signals.</li>
+    </ul>
+    <p><strong>Public-safe:</strong> All IDs pseudonymized. No client names, domains, raw queries, or credentials appear in this work.</p>
+
+    <!-- Section 3 -->
+    <h2>3. Methodology</h2>
+
+    <h3>Assumptions</h3>
+    <ol>
+      <li>The proxy label (<code>avg_position_h2 &gt; avg_position_h1 * 1.10</code>) is a <strong>weak heuristic</strong>, not ground truth. It captures pages where search rank worsened by &ge;10% over two weeks. Seasonal fluctuations, SERP feature changes, and measurement noise all contribute to position changes that don't reflect content quality. I flag it as a proxy throughout, not a finding.</li>
+      <li>Features from H1 (days 1&ndash;15) are knowable before H2 (days 16&ndash;31) opens. The temporal split enforces decision-moment discipline.</li>
+      <li>Recall matters more than precision. A missed high-visibility decliner keeps losing traffic; a false alarm costs the reviewer 20 minutes.</li>
+    </ol>
+
+    <h3>Features (17 total)</h3>
+    <table>
+      <thead><tr><th>Feature</th><th>Source</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>impressions_h1</code></td><td>fact (days 1&ndash;15)</td><td>Total GSC impressions in the feature window</td></tr>
+        <tr><td><code>clicks_h1</code></td><td>fact (days 1&ndash;15)</td><td>Total GSC clicks</td></tr>
+        <tr><td><code>avg_position_h1</code></td><td>fact (days 1&ndash;15)</td><td>Average GSC position (lower = better)</td></tr>
+        <tr><td><code>sessions_h1</code></td><td>fact (days 1&ndash;15)</td><td>GA4 sessions (~30% NULL where GA4 unavailable)</td></tr>
+        <tr><td><code>engaged_sessions_h1</code></td><td>fact (days 1&ndash;15)</td><td>GA4 engaged sessions</td></tr>
+        <tr><td><code>sessions_organic_h1</code></td><td>fact (days 1&ndash;15)</td><td>Organic search sessions</td></tr>
+        <tr><td><code>word_count</code></td><td>dim_content</td><td>Article word count (~34% NULL)</td></tr>
+        <tr><td><code>search_volume</code></td><td>dim_content</td><td>Keyword search demand (~18% NULL)</td></tr>
+        <tr><td><code>content_age_days</code></td><td>derived</td><td>Days since content creation to March 1</td></tr>
+        <tr><td><code>days_since_update</code></td><td>derived</td><td>Days since last optimisation (capped at 0)</td></tr>
+        <tr><td><code>ctr_h1</code></td><td>derived</td><td>Clicks / impressions in H1</td></tr>
+        <tr><td><code>has_ga4</code></td><td>derived</td><td>1 if any GA4 session in H1</td></tr>
+        <tr><td><code>log_impressions_h1</code></td><td>derived</td><td>log1p(impressions_h1)</td></tr>
+        <tr><td><code>log_clicks_h1</code></td><td>derived</td><td>log1p(clicks_h1)</td></tr>
+        <tr><td><code>log_sessions_h1</code></td><td>derived</td><td>log1p(sessions_h1)</td></tr>
+        <tr><td><code>is_stale</code></td><td>derived</td><td>1 if days_since_update &gt;= 180</td></tr>
+        <tr><td><code>is_visible_h1</code></td><td>derived</td><td>1 if impressions_h1 &gt;= 100</td></tr>
+      </tbody>
+    </table>
+    <p>Categorical features (3): <code>competition_level</code>, <code>main_intent</code>, <code>content_type</code> &mdash; one-hot encoded for logistic regression, label-encoded for XGBoost.</p>
+
+    <h3>Label definition</h3>
+    <p><code>proxy_decline = 1</code> if <code>avg_position_h2 &gt; avg_position_h1 * 1.10</code> (position worsened &ge;10%), 0 otherwise. Only pages with non-NULL position in both halves are labelable. Observed rate: ~44%.</p>
+
+    <h3>Baseline</h3>
+    <p><strong>Heuristic rule:</strong> <code>score = is_stale * is_visible_h1 * impressions_h1</code>. Reason code: <code>stale_visible</code> if both flags true, <code>visible</code> if traffic only, <code>no_action</code> otherwise. A non-engineer can understand it in one sentence: "Pages nobody has touched in 6+ months that still get search traffic are worth a look, and the ones with the most traffic are worth looking at first."</p>
+
+    <h3>Validation design</h3>
+    <ul>
+      <li><strong>Time split by construction:</strong> features = days 1&ndash;15, label = days 16&ndash;31.</li>
+      <li><strong>80/20 random split</strong> (stratified by <code>proxy_decline</code>): tests generalisation across pages.</li>
+      <li><strong>Evaluation restricted to visible pages</strong> (impressions_h1 &gt;= 100).</li>
+      <li><strong>Primary metric:</strong> Recall@50 among visible test pages.</li>
+    </ul>
+
+    <h3>Leakage checks</h3>
+    <ol>
+      <li><strong>Column audit:</strong> No label-window columns appear in the feature set. Verified programmatically.</li>
+      <li><strong>Leakage injection test:</strong> I trained a second XGBClassifier with the exact same features plus <code>impressions_h2</code> added. The AP difference between the leaky and honest models is the leakage signal. Self-computed in <code>capstone.ipynb</code>.</li>
+      <li><strong>Feature timeline:</strong> Every feature is from H1 or <code>dim_content</code> (static). No feature requires H2 or later.</li>
+    </ol>
+
+    <!-- Section 4 -->
+    <h2>4. Results</h2>
+
+    <h3>Model vs baseline (same split, same metric)</h3>
+    <table>
+      <thead>
+        <tr><th>Model</th><th>Recall@20</th><th>Recall@50</th><th>Recall@100</th><th>Precision@50</th><th>Avg. Precision</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Heuristic rule</td><td>0.2%</td><td>0.3%</td><td>0.6%</td><td>42.0%</td><td>0.435</td></tr>
+        <tr><td>Logistic Regression</td><td>0.2%</td><td>0.5%</td><td>1.1%</td><td>66.0%</td><td>0.554</td></tr>
+        <tr><td>XGBoost</td><td>0.3%</td><td>0.7%</td><td>1.3%</td><td>88.0%</td><td>0.652</td></tr>
+      </tbody>
+    </table>
+    <p><em>Base rate: <span class="fill">43.3%</span> (fraction of visible test pages that are declining). All numbers self-computed in <code>capstone.ipynb</code>.</em></p>
+    <p><strong>Key finding:</strong> <span class="fill">At K=50, XGBoost achieves 88% precision versus 42% for the heuristic. A reviewer checking 50 pages flagged by XGBoost finds 44 declining pages; the same reviewer checking 50 heuristic pages finds only 21. The model doubles the hit rate per review batch.</span></p>
+
+    <h3>Feature importances (XGBoost, gain)</h3>
+    <table>
+      <thead><tr><th>Rank</th><th>Feature</th><th>Importance</th><th>Plausibility check</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>avg_position_h1</td><td>0.1520</td><td>H1 fact &mdash; SAFE. Direct measure of search visibility at decision time.</td></tr>
+        <tr><td>2</td><td>is_stale</td><td>0.1237</td><td>Derived &mdash; SAFE. Staleness is a plausible signal for content decay.</td></tr>
+        <tr><td>3</td><td>has_ga4</td><td>0.1167</td><td>Derived &mdash; SAFE. Pages without GA4 tracking may be lower priority.</td></tr>
+      </tbody>
+    </table>
+    <p>The top features are search position, staleness, and GA4 availability &mdash; all H1 or static features knowable at decision time. No label-window columns appear.</p>
+
+    <h3>Error analysis</h3>
+    <p>The model's most costly errors are false negatives &mdash; declining pages the model missed. These tend to be pages with moderate traffic (median 515 impressions), healthy H1 search position (median 6.1), and recent updates (median 25 days since last optimisation). Only 25.7% were stale. They are hard because the H1 snapshot looks healthy; the decline is subtle and only visible in the H2 position shift.</p>
+
+    <!-- Section 5 -->
+    <h2>5. Limitations and honest framing</h2>
+    <p>This work uses observed and directional language throughout. No causal claims are made.</p>
+    <p><strong>Proxy label weakness.</strong> The label (<code>avg_position_worsened &gt;= 10%</code>) is a heuristic. It ignores magnitude (a 10% and a 60% decline look identical), excludes pages with zero H1 impressions (~55% of all pages), and may flag seasonal fluctuations as decline. This is a known limitation that should motivate future work with raw trend_pct or human-annotated labels, not a finding to be explained away.</p>
+    <p><strong>One month only.</strong> Everything here is March 2026. Seasonality, algorithm updates, and content lifecycle stages vary across months. The June 2026 partition is sealed for future out-of-sample evaluation, but the current results should be treated as directional, not definitive.</p>
+    <p><strong>Visibility floor bias.</strong> I only evaluate among pages with &ge;100 H1 impressions. The model's behaviour on low-traffic pages is unobserved in our metrics. A page with 10 impressions dropping to 2 is technically declining, but flagging it wastes reviewer time &mdash; the floor is a deliberate design choice, not an oversight.</p>
+    <p><strong>No causal claim.</strong> The model ranks pages by observed association with decline. It does not predict what will happen if a page is refreshed. The data is observational, not experimental. "These pages look worth reviewing first" is the honest claim; "refreshing these pages will recover traffic" is not supported.</p>
+    <p><strong>Client concentration.</strong> A small number of clients contribute the majority of high-traffic pages. Results may not generalise to portfolios with different traffic distributions.</p>
+    <p><strong>No algorithm prediction.</strong> I am not modelling Google's ranking algorithm. I am modelling which pages a human reviewer should prioritise, using search performance metrics as signals.</p>
+
+    <!-- Section 6 -->
+    <h2>6. Ranked recommendations</h2>
+    <table>
+      <thead><tr><th>Priority</th><th>Action</th><th>When</th><th>Confidence</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Immediate</strong></td><td>Review top-20 pages by model score</td><td>Start of each review cycle</td><td>High</td></tr>
+        <tr><td><strong>This cycle</strong></td><td>Review pages ranked 21&ndash;50</td><td>After top-20 is cleared</td><td>High</td></tr>
+        <tr><td><strong>Monitor</strong></td><td>Watch pages with score 0.4&ndash;0.6</td><td>Monthly check-in</td><td>Medium</td></tr>
+        <tr><td><strong>Low priority</strong></td><td>Pages with score &lt; 0.4</td><td>Only if spare capacity</td><td>Low</td></tr>
+        <tr><td><strong>Never automate</strong></td><td>Every flagged page needs human editorial judgment</td><td>Always</td><td>&mdash;</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Reason codes</strong> explain <em>why</em> each page scored the way it did: <code>stale</code> (not updated in 6+ months), <code>high_traffic</code> (&ge;500 H1 impressions), <code>deep_position</code> (average position &gt; 20), <code>low_ctr</code> (&lt;1% CTR with meaningful traffic), <code>old_content</code> (created &gt; 1 year ago), <code>no_ga4_data</code> (missing engagement metrics).</p>
+
+    <!-- Section 7 -->
+    <h2>7. Reproducibility</h2>
+    <ul>
+      <li><strong>Notebooks:</strong> All work is in <code>work/notebooks/</code>. The capstone notebook (<code>capstone.ipynb</code>) runs top to bottom and produces all reported numbers.</li>
+      <li><strong>Data:</strong> FlyRank internship warehouse on Hugging Face (<code>FlyRank/internship-warehouse</code>), March 2026 partition. Gate access is instant-approval.</li>
+      <li><strong>Cache:</strong> <code>work/outputs/mar_page_month.parquet</code> &mdash; the page-month aggregate built by <code>w03_data_contract.ipynb</code>.</li>
+      <li><strong>Random seed:</strong> <code>RANDOM_SEED = 42</code> (set at top of <code>capstone.ipynb</code>).</li>
+      <li><strong>Dependencies:</strong> <code>pip install pandas numpy scikit-learn xgboost duckdb huggingface_hub matplotlib</code></li>
+      <li><strong>To re-run:</strong> Clone repo, set <code>HF_TOKEN</code>, run <code>w03_data_contract.ipynb</code> (builds cache), then run <code>capstone.ipynb</code> top to bottom.</li>
+    </ul>
+
+    <hr>
+
+    <!-- Section 8 -->
+    <h2>8. Acknowledgments &amp; data credit</h2>
+    <p>Built on the <a href="https://flyrank.ai">FlyRank ML Internship dataset</a>.</p>
+    <p>The warehouse release (<code>FlyRank/internship-warehouse</code> on Hugging Face) provides ~79M rows of pseudonymized daily search performance data across 104 clients and 519K content items. This dataset makes the work possible &mdash; without a real, large-scale search performance dataset at this grain, content opportunity scoring remains a theoretical exercise.</p>
+
+    <hr>
+    <p style="color: var(--muted); font-size: 0.85rem; text-align: center; margin-top: 2rem;">
+      All numbers in this paper are self-computed in <code>work/notebooks/capstone.ipynb</code> from the cached parquet file.
+      No metrics are imported from prior notebooks. The full code is public in the <a href="https://github.com/SalehAl-Nassar/flyrank-internship-ml">linked repository</a>.
+    </p>
+
+  </div>
+</body>
+</html>
