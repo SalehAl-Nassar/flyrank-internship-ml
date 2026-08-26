@@ -122,7 +122,7 @@
     </div>
 
     <abstract>
-      Content teams managing large portfolios face a prioritisation problem: hundreds of thousands of pages compete for finite review capacity, and missing a high-traffic page in decline is costlier than auditing one that didn't need attention. I built a ranked queue that scores each content page by its probability of decline, using features derived from the first half of March 2026 and a proxy label defined from the second half &mdash; enforcing strict temporal separation between what the model sees and what it predicts. I trained a gradient-boosted tree model (XGBoost) on 17 features across ~141,000 labelable pages from the FlyRank internship warehouse (~79M daily rows), and evaluated both a heuristic baseline and the learned model on Recall@K among pages with at least 100 search impressions. The XGBoost model captured a larger fraction of declining high-traffic pages at every K compared to the heuristic, with the gap widening at higher reviewer capacities. The output is a ranked queue with human-readable reason codes &mdash; not just a score &mdash; designed to support a reviewer's decision about which pages to audit first.
+      Content teams managing large portfolios face a prioritisation problem: hundreds of thousands of pages compete for finite review capacity, and missing a high-traffic page in decline is costlier than auditing one that didn't need attention. I built a ranked queue that scores each content page by its probability of decline, using features derived from the first half of March 2026 and a proxy label defined from the second half &mdash; enforcing strict temporal separation between what the model sees and what it predicts. I trained a gradient-boosted tree model (XGBoost) on 17 features across 77,540 pages (141,467 total labelable pages in the March release; 77,540 met the visibility floor of &ge;100 H1 impressions and were used for scoring) from the FlyRank internship warehouse (~79M daily rows), and evaluated both a heuristic baseline and the learned model on precision@K. The XGBoost model achieved 88% precision at K=50 compared to 42% for the heuristic &mdash; meaning a reviewer checking the top 50 model-scored pages finds 44 declining pages, versus 21 with the heuristic. The output is a ranked queue with human-readable reason codes &mdash; not just a score &mdash; designed to support a reviewer's decision about which pages to audit first.
     </abstract>
 
     <!-- Section 1 -->
@@ -147,7 +147,7 @@
       <li><strong>Feature window (H1):</strong> March 1&ndash;15, 2026. All features computed from this window or from <code>dim_content</code> (static metadata).</li>
       <li><strong>Label window (H2):</strong> March 16&ndash;31, 2026. Proxy label computed exclusively from this window.</li>
     </ul>
-    <p><strong>Population:</strong> ~320,000 distinct pages in March 2026. ~141,000 had non-NULL average search position in both H1 and H2 (required for the label). Among those, ~44% were classified as declining.</p>
+    <p><strong>Population:</strong> ~320,000 distinct pages in March 2026. 141,467 had non-NULL average search position in both H1 and H2 (required for the label). After applying the visibility floor (<code>impressions_h1 &gt;= 100</code>), 77,540 pages remain &mdash; this is the population used for modelling and evaluation. Among those, 43.3% were classified as declining.</p>
     <p><strong>Visibility floor:</strong> Evaluation restricted to pages with <code>impressions_h1 &gt;= 100</code>. Pages below this threshold don't have enough search traffic to warrant reviewer attention.</p>
     <p><strong>Exclusions:</strong></p>
     <ul>
@@ -194,7 +194,7 @@
     <p>Categorical features (3): <code>competition_level</code>, <code>main_intent</code>, <code>content_type</code> &mdash; one-hot encoded for logistic regression, label-encoded for XGBoost.</p>
 
     <h3>Label definition</h3>
-    <p><code>proxy_decline = 1</code> if <code>avg_position_h2 &gt; avg_position_h1 * 1.10</code> (position worsened &ge;10%), 0 otherwise. Only pages with non-NULL position in both halves are labelable. Observed rate: ~44%.</p>
+    <p><code>proxy_decline = 1</code> if <code>avg_position_h2 &gt; avg_position_h1 * 1.10</code> (position worsened &ge;10%), 0 otherwise. Only pages with non-NULL position in both halves are labelable. Observed rate: 43.7% across all labelable pages; 43.3% among the visible population used for evaluation.</p>
 
     <h3>Baseline</h3>
     <p><strong>Heuristic rule:</strong> <code>score = is_stale * is_visible_h1 * impressions_h1</code>. Reason code: <code>stale_visible</code> if both flags true, <code>visible</code> if traffic only, <code>no_action</code> otherwise. A non-engineer can understand it in one sentence: "Pages nobody has touched in 6+ months that still get search traffic are worth a look, and the ones with the most traffic are worth looking at first."</p>

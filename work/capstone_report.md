@@ -38,7 +38,7 @@ The cost asymmetry matters: a false negative (missing a page that truly needs re
 - **Feature window (H1):** March 1–15, 2026. All features are computed from this window or from `dim_content` (static metadata).
 - **Label window (H2):** March 16–31, 2026. The proxy label is computed exclusively from this window.
 
-**Population:** ~320,000 distinct pages in March 2026. Of these, ~141,000 had non-NULL average search position in both H1 and H2 (required for the label). Among those, ~44% were classified as declining.
+**Population:** ~320,000 distinct pages in March 2026. Of these, 141,467 had non-NULL average search position in both H1 and H2 (required for the label). After applying the visibility floor (`impressions_h1 >= 100`), 77,540 pages remain — this is the population used for modelling and evaluation. Among those, 43.3% were classified as declining.
 
 **Visibility floor:** We restrict evaluation to pages with `impressions_h1 >= 100`. Pages below this threshold get no score in the ranked queue — they don't have enough search traffic to warrant reviewer attention, regardless of trend direction.
 
@@ -87,7 +87,7 @@ Categorical features (3): `competition_level`, `main_intent`, `content_type` —
 
 ### Label definition
 
-`proxy_decline = 1` if `avg_position_h2 > avg_position_h1 * 1.10` (position worsened ≥10%), 0 otherwise. Only pages with non-NULL position in both halves are labelable. Observed rate: ~44%.
+`proxy_decline = 1` if `avg_position_h2 > avg_position_h1 * 1.10` (position worsened ≥10%), 0 otherwise. Only pages with non-NULL position in both halves are labelable. Observed rate: 43.7% across all labelable pages; 43.3% among the visible population used for evaluation.
 
 ### Baseline
 
