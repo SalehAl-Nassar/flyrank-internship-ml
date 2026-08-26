@@ -155,6 +155,8 @@ This work uses observed and directional language throughout. No causal claims ar
 
 **No algorithm prediction.** We are not modelling Google's ranking algorithm. We are modelling which pages a human reviewer should prioritise, using search performance metrics as signals.
 
+**Limited coverage at small K.** At K=50, the model surfaces only ~0.7% of all declining pages — Recall@50 is 0.7% because the decline population is ~6,700 pages and K is 50. The queue is designed for finite reviewer capacity per cycle, not full-population coverage. Precision@50 (88%) tells the efficiency story: of the 50 pages reviewed, 44 are actually declining. Recall tells the coverage story: those 44 are a tiny slice of the total. Both are true; the right number depends on whether you're asking "how good is each batch?" or "how much ground do we cover?"
+
 ---
 
 ## 6. Ranked recommendations
